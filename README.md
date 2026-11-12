@@ -137,6 +137,14 @@ FundScopeAI/
    adb shell am start -n com.fundscope.ai/.MainActivity
    ```
 
+5. **Screenshots:**
+
+   ![App Screenshot](app/src/test/assets/app1.jpeg)
+   ![App Screenshot](app/src/test/assets/app2.jpeg)
+   ![App Screenshot](app/src/test/assets/app3.jpeg)
+   ![App Screenshot](app/src/test/assets/app4.jpeg)
+
+  
 ---
 
 ## ⚖️ Disclaimer & Compliance Notice
