@@ -2,6 +2,7 @@ package com.fundscope.ai.data
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -260,8 +261,56 @@ class FundRepository(private val context: Context) {
         )
     )
 
+    /**
+     * Seeds initial database and warms up live NAV feeds during splash screen.
+     */
+    suspend fun initializeAppData(
+        onProgress: suspend (progress: Float, status: String) -> Unit
+    ) = withContext(Dispatchers.IO) {
+        onProgress(0.15f, "Initializing secure Room database…")
+        delay(250)
+        dao.upsertAll(baselineFunds)
+
+        onProgress(0.35f, "Synchronizing AMFI scheme codes…")
+        delay(200)
+
+        // Fetch live NAVs for the top initial baseline funds
+        val topSchemes = listOf("122639", "119062", "125354", "120503")
+        for ((idx, code) in topSchemes.withIndex()) {
+            val progressStep = 0.40f + (idx + 1) * 0.12f
+            onProgress(progressStep, "Fetching live NAV for scheme #$code…")
+            try {
+                fetchSchemeDetails(code)
+            } catch (_: Exception) {
+                // Ignore individual network hiccups
+            }
+        }
+
+        onProgress(0.95f, "Finalizing scoring models & analytics…")
+        delay(200)
+        onProgress(1.0f, "Ready")
+    }
+
     suspend fun seedInitialDataIfEmpty(): Unit = withContext(Dispatchers.IO) {
         dao.upsertAll(baselineFunds)
+    }
+
+    /**
+     * Syncs live NAV for all available funds in Room.
+     */
+    suspend fun syncAllLiveNavs(
+        onProgress: suspend (current: Int, total: Int) -> Unit = { _, _ -> }
+    ): Int = withContext(Dispatchers.IO) {
+        val allCodes = baselineFunds.map { it.schemeCode }
+        var successCount = 0
+        for ((i, code) in allCodes.withIndex()) {
+            try {
+                val updated = fetchSchemeDetails(code)
+                if (updated != null) successCount++
+            } catch (_: Exception) {}
+            onProgress(i + 1, allCodes.size)
+        }
+        successCount
     }
 
     /**
@@ -274,8 +323,8 @@ class FundRepository(private val context: Context) {
             val encoded = URLEncoder.encode(query.trim(), "UTF-8")
             val url = URL("https://api.mfapi.in/mf/search?q=$encoded")
             val connection = (url.openConnection() as HttpURLConnection).apply {
-                connectTimeout = 5000
-                readTimeout = 5000
+                connectTimeout = 4000
+                readTimeout = 4000
                 requestMethod = "GET"
                 setRequestProperty("Accept", "application/json")
             }
@@ -298,7 +347,7 @@ class FundRepository(private val context: Context) {
                                 name = name,
                                 amc = amcGuessed,
                                 category = catGuessed,
-                                sourceName = "AMFI (Verified MFAPI)",
+                                sourceName = "AMFI (Live Mirror)",
                                 note = "Live AMFI Scheme Code: $code. Tap to fetch full NAV historical analytics."
                             )
                         )
@@ -327,8 +376,8 @@ class FundRepository(private val context: Context) {
         try {
             val url = URL("https://api.mfapi.in/mf/$schemeCode")
             val connection = (url.openConnection() as HttpURLConnection).apply {
-                connectTimeout = 7000
-                readTimeout = 7000
+                connectTimeout = 6000
+                readTimeout = 6000
                 requestMethod = "GET"
                 setRequestProperty("Accept", "application/json")
             }

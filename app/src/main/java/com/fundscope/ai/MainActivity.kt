@@ -3,9 +3,13 @@ package com.fundscope.ai
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -30,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -57,21 +62,49 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun FundScopeApp() {
     val context = LocalContext.current
+    val activity = context as? ComponentActivity
     val repository = remember { FundRepository(context) }
     val scope = rememberCoroutineScope()
+
+    var isAppReady by rememberSaveable { mutableStateOf(false) }
+    var splashProgress by remember { mutableFloatStateOf(0.1f) }
+    var splashStatus by remember { mutableStateOf("Initializing Mutual Fund Database…") }
 
     var tab by rememberSaveable { mutableStateOf("Discover") }
     var selectedSchemeCode by rememberSaveable { mutableStateOf<String?>(null) }
     var isSyncing by remember { mutableStateOf(false) }
+    var lastBackPressTime by remember { mutableLongStateOf(0L) }
 
     val observedFunds by repository.observedFunds.collectAsState(initial = emptyList())
+    val selectedFund = observedFunds.find { it.schemeCode == selectedSchemeCode }
 
-    // Initial database seed
+    // Splash Screen Warmup / Seeding
     LaunchedEffect(Unit) {
-        repository.seedInitialDataIfEmpty()
+        if (!isAppReady) {
+            repository.initializeAppData { progress, status ->
+                splashProgress = progress
+                splashStatus = status
+            }
+            isAppReady = true
+        }
     }
 
-    val selectedFund = observedFunds.find { it.schemeCode == selectedSchemeCode }
+    // Double back press to exit on any main screen
+    BackHandler(enabled = isAppReady) {
+        if (selectedFund != null) {
+            // Close detail screen first
+            selectedSchemeCode = null
+        } else {
+            // On any main screen: Require double back press within 2000ms
+            val currentTime = System.currentTimeMillis()
+            if (currentTime - lastBackPressTime < 2000L) {
+                activity?.finish()
+            } else {
+                lastBackPressTime = currentTime
+                Toast.makeText(context, "Press back again to exit", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     MaterialTheme(
         colorScheme = darkColorScheme(
@@ -80,127 +113,269 @@ fun FundScopeApp() {
         )
     ) {
         Surface(Modifier.fillMaxSize(), color = CanvasBg) {
-            BoxWithConstraints(Modifier.fillMaxSize()) {
-                val isWide = this.maxWidth >= 840.dp
-                val isMedium = this.maxWidth in 600.dp..839.dp
-                val isNavigationRail = isWide || isMedium
+            if (!isAppReady) {
+                // Splash screen with progress
+                SplashScreen(
+                    progress = splashProgress,
+                    status = splashStatus,
+                    onSkip = { isAppReady = true }
+                )
+            } else {
+                // Main App Content with Screen-Size Responsiveness
+                BoxWithConstraints(Modifier.fillMaxSize()) {
+                    val isWide = this.maxWidth >= 840.dp
+                    val isMedium = this.maxWidth in 600.dp..839.dp
+                    val isNavigationRail = isWide || isMedium
 
-                if (isNavigationRail) {
-                    // Responsive Tablet / Desktop / Foldable Layout (NavigationRail on Left)
-                    Row(Modifier.fillMaxSize()) {
-                        AppNavigationRail(
-                            currentTab = tab,
-                            onTabSelected = {
-                                tab = it
-                                if (it != "Discover") selectedSchemeCode = null
+                    if (isNavigationRail) {
+                        // Responsive Tablet / Desktop / Foldable Layout (NavigationRail on Left)
+                        Row(Modifier.fillMaxSize()) {
+                            AppNavigationRail(
+                                currentTab = tab,
+                                onTabSelected = {
+                                    tab = it
+                                    if (it != "Discover") selectedSchemeCode = null
+                                }
+                            )
+                            Box(Modifier.weight(1f).fillMaxHeight()) {
+                                when (tab) {
+                                    "Discover" -> {
+                                        if (isWide) {
+                                            // Two-Pane (Split Master-Detail) Layout for Expanded Screens
+                                            TwoPaneDiscoverScreen(
+                                                funds = observedFunds,
+                                                selectedFund = selectedFund,
+                                                onSelectFund = { selectedSchemeCode = it.schemeCode },
+                                                onRefreshScheme = { code ->
+                                                    scope.launch {
+                                                        isSyncing = true
+                                                        repository.fetchSchemeDetails(code)
+                                                        isSyncing = false
+                                                    }
+                                                },
+                                                onSyncAllNavs = {
+                                                    scope.launch {
+                                                        isSyncing = true
+                                                        val count = repository.syncAllLiveNavs()
+                                                        isSyncing = false
+                                                        Toast.makeText(context, "Updated $count Live NAVs from AMFI", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                },
+                                                isSyncing = isSyncing,
+                                                repository = repository
+                                            )
+                                        } else {
+                                            // Medium Screens (Adaptive Grid or Full Detail)
+                                            if (selectedFund != null) {
+                                                FundDetail(
+                                                    fund = selectedFund,
+                                                    onBack = { selectedSchemeCode = null },
+                                                    onRefresh = {
+                                                        scope.launch {
+                                                            isSyncing = true
+                                                            repository.fetchSchemeDetails(selectedFund.schemeCode)
+                                                            isSyncing = false
+                                                        }
+                                                    },
+                                                    isSyncing = isSyncing
+                                                )
+                                            } else {
+                                                AdaptiveDiscoverScreen(
+                                                    funds = observedFunds,
+                                                    columnsCount = 2,
+                                                    onSelectFund = { selectedSchemeCode = it.schemeCode },
+                                                    onSyncAllNavs = {
+                                                        scope.launch {
+                                                            isSyncing = true
+                                                            val count = repository.syncAllLiveNavs()
+                                                            isSyncing = false
+                                                            Toast.makeText(context, "Updated $count Live NAVs from AMFI", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    },
+                                                    isSyncing = isSyncing,
+                                                    repository = repository
+                                                )
+                                            }
+                                        }
+                                    }
+                                    "SIP Lab" -> ResponsiveSipScreen(isWide = isWide)
+                                    "Sources" -> TrustworthySourcesScreen(
+                                        sources = repository.trustworthySources,
+                                        isWide = isWide
+                                    )
+                                    "Method" -> ResponsiveMethodScreen(isWide = isWide)
+                                }
                             }
-                        )
-                        Box(Modifier.weight(1f).fillMaxHeight()) {
-                            when (tab) {
-                                "Discover" -> {
-                                    if (isWide) {
-                                        // Two-Pane (Split Master-Detail) Layout for Expanded Screens
-                                        TwoPaneDiscoverScreen(
+                        }
+                    } else {
+                        // Mobile Portrait / Compact Layout (Bottom NavigationBar)
+                        if (selectedFund != null && tab == "Discover") {
+                            FundDetail(
+                                fund = selectedFund,
+                                onBack = { selectedSchemeCode = null },
+                                onRefresh = {
+                                    scope.launch {
+                                        isSyncing = true
+                                        repository.fetchSchemeDetails(selectedFund.schemeCode)
+                                        isSyncing = false
+                                    }
+                                },
+                                isSyncing = isSyncing
+                            )
+                        } else {
+                            Column(Modifier.fillMaxSize()) {
+                                Header(
+                                    isSyncing = isSyncing,
+                                    onSyncClick = {
+                                        scope.launch {
+                                            isSyncing = true
+                                            val count = repository.syncAllLiveNavs()
+                                            isSyncing = false
+                                            Toast.makeText(context, "Synchronized $count Live NAVs from AMFI", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                )
+                                Box(Modifier.weight(1f).fillMaxWidth()) {
+                                    when (tab) {
+                                        "Discover" -> AdaptiveDiscoverScreen(
                                             funds = observedFunds,
-                                            selectedFund = selectedFund,
+                                            columnsCount = 1,
                                             onSelectFund = { selectedSchemeCode = it.schemeCode },
-                                            onRefreshScheme = { code ->
+                                            onSyncAllNavs = {
                                                 scope.launch {
                                                     isSyncing = true
-                                                    repository.fetchSchemeDetails(code)
+                                                    val count = repository.syncAllLiveNavs()
                                                     isSyncing = false
+                                                    Toast.makeText(context, "Synchronized $count Live NAVs from AMFI", Toast.LENGTH_SHORT).show()
                                                 }
                                             },
                                             isSyncing = isSyncing,
                                             repository = repository
                                         )
-                                    } else {
-                                        // Medium Screens (Adaptive Grid or Full Detail)
-                                        if (selectedFund != null) {
-                                            BackHandler { selectedSchemeCode = null }
-                                            FundDetail(
-                                                fund = selectedFund,
-                                                onBack = { selectedSchemeCode = null },
-                                                onRefresh = {
-                                                    scope.launch {
-                                                        isSyncing = true
-                                                        repository.fetchSchemeDetails(selectedFund.schemeCode)
-                                                        isSyncing = false
-                                                    }
-                                                },
-                                                isSyncing = isSyncing
-                                            )
-                                        } else {
-                                            AdaptiveDiscoverScreen(
-                                                funds = observedFunds,
-                                                columnsCount = 2,
-                                                onSelectFund = { selectedSchemeCode = it.schemeCode },
-                                                repository = repository
-                                            )
-                                        }
+                                        "SIP Lab" -> ResponsiveSipScreen(isWide = false)
+                                        "Sources" -> TrustworthySourcesScreen(
+                                            sources = repository.trustworthySources,
+                                            isWide = false
+                                        )
+                                        "Method" -> ResponsiveMethodScreen(isWide = false)
                                     }
                                 }
-                                "SIP Lab" -> ResponsiveSipScreen(isWide = isWide)
-                                "Sources" -> TrustworthySourcesScreen(
-                                    sources = repository.trustworthySources,
-                                    isWide = isWide
-                                )
-                                "Method" -> ResponsiveMethodScreen(isWide = isWide)
-                            }
-                        }
-                    }
-                } else {
-                    // Mobile Portrait / Compact Layout (Bottom NavigationBar)
-                    if (selectedFund != null && tab == "Discover") {
-                        BackHandler { selectedSchemeCode = null }
-                        FundDetail(
-                            fund = selectedFund,
-                            onBack = { selectedSchemeCode = null },
-                            onRefresh = {
-                                scope.launch {
-                                    isSyncing = true
-                                    repository.fetchSchemeDetails(selectedFund.schemeCode)
-                                    isSyncing = false
-                                }
-                            },
-                            isSyncing = isSyncing
-                        )
-                    } else {
-                        Column(Modifier.fillMaxSize()) {
-                            Header()
-                            Box(Modifier.weight(1f).fillMaxWidth()) {
-                                when (tab) {
-                                    "Discover" -> AdaptiveDiscoverScreen(
-                                        funds = observedFunds,
-                                        columnsCount = 1,
-                                        onSelectFund = { selectedSchemeCode = it.schemeCode },
-                                        repository = repository
-                                    )
-                                    "SIP Lab" -> ResponsiveSipScreen(isWide = false)
-                                    "Sources" -> TrustworthySourcesScreen(
-                                        sources = repository.trustworthySources,
-                                        isWide = false
-                                    )
-                                    "Method" -> ResponsiveMethodScreen(isWide = false)
-                                }
-                            }
-                            NavigationBar(containerColor = Navy, contentColor = Mint) {
-                                navItems.forEach { (label, icon) ->
-                                    NavigationBarItem(
-                                        selected = tab == label,
-                                        onClick = { tab = label },
-                                        icon = { Icon(icon, contentDescription = label) },
-                                        label = { Text(label, fontSize = 11.sp) },
-                                        colors = NavigationBarItemDefaults.colors(
-                                            selectedIconColor = Mint, selectedTextColor = Mint,
-                                            indicatorColor = Panel, unselectedTextColor = Muted
+                                NavigationBar(containerColor = Navy, contentColor = Mint) {
+                                    navItems.forEach { (label, icon) ->
+                                        NavigationBarItem(
+                                            selected = tab == label,
+                                            onClick = { tab = label },
+                                            icon = { Icon(icon, contentDescription = label) },
+                                            label = { Text(label, fontSize = 11.sp) },
+                                            colors = NavigationBarItemDefaults.colors(
+                                                selectedIconColor = Mint, selectedTextColor = Mint,
+                                                indicatorColor = Panel, unselectedTextColor = Muted
+                                            )
                                         )
-                                    )
+                                    }
                                 }
                             }
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * High-performance splash screen for warming up Room and fetching live NAV feeds.
+ */
+@Composable
+fun SplashScreen(
+    progress: Float,
+    status: String,
+    onSkip: () -> Unit
+) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(CanvasBg)
+            .padding(32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.fillMaxWidth().wrapContentHeight()
+        ) {
+            // App Branding Icon with Reticle
+            Box(Modifier.size(96.dp), contentAlignment = Alignment.Center) {
+                Canvas(Modifier.fillMaxSize()) {
+                    drawCircle(color = Panel, radius = size.minDimension / 2)
+                    drawCircle(color = Navy, radius = size.minDimension / 2.6f)
+                    drawArc(
+                        color = Mint,
+                        startAngle = -90f,
+                        sweepAngle = progress * 360f,
+                        useCenter = false,
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(
+                            width = 3.dp.toPx(),
+                            cap = StrokeCap.Round
+                        )
+                    )
+                }
+                Icon(
+                    Icons.Default.QueryStats,
+                    contentDescription = "Logo",
+                    tint = Mint,
+                    modifier = Modifier.size(46.dp)
+                )
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            Text(
+                "FUNDSCOPE AI",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 2.sp,
+                color = Color.White
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Indian Mutual Fund Intelligence Desk",
+                fontSize = 12.sp,
+                color = Muted,
+                letterSpacing = 0.5.sp
+            )
+
+            Spacer(Modifier.height(36.dp))
+
+            // Linear Progress Indicator
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier
+                    .fillMaxWidth(0.7f)
+                    .height(6.dp),
+                color = Mint,
+                trackColor = PanelAlt
+            )
+
+            Spacer(Modifier.height(14.dp))
+
+            Text(
+                status,
+                color = Gold,
+                fontSize = 11.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 20.dp)
+            )
+
+            Spacer(Modifier.height(30.dp))
+
+            OutlinedButton(
+                onClick = onSkip,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Muted),
+                border = androidx.compose.foundation.BorderStroke(1.dp, PanelAlt),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Text("Continue to Workspace", fontSize = 11.sp)
             }
         }
     }
@@ -271,7 +446,10 @@ fun AppNavigationRail(
 }
 
 @Composable
-fun Header() {
+fun Header(
+    isSyncing: Boolean = false,
+    onSyncClick: () -> Unit = {}
+) {
     Column(Modifier.fillMaxWidth().background(Navy).padding(horizontal = 20.dp, vertical = 14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Surface(
@@ -289,14 +467,29 @@ fun Header() {
                 Text("India Mutual Fund Intelligence • AMFI Feed", fontSize = 11.sp, color = Muted)
             }
             Spacer(Modifier.weight(1f))
-            Surface(color = Color(0xFF1B3B32), shape = RoundedCornerShape(20.dp)) {
+
+            // Live NAV Sync Pill Button
+            Surface(
+                color = Color(0xFF1B3B32),
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.clickable { onSyncClick() }
+            ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                 ) {
-                    Box(Modifier.size(7.dp).background(Mint, CircleShape))
+                    if (isSyncing) {
+                        CircularProgressIndicator(modifier = Modifier.size(10.dp), color = Mint, strokeWidth = 2.dp)
+                    } else {
+                        Box(Modifier.size(7.dp).background(Mint, CircleShape))
+                    }
                     Spacer(Modifier.width(6.dp))
-                    Text("AMFI LIVE", color = Mint, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (isSyncing) "SYNCING…" else "AMFI LIVE",
+                        color = Mint,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
@@ -308,6 +501,8 @@ fun AdaptiveDiscoverScreen(
     funds: List<FundEntity>,
     columnsCount: Int,
     onSelectFund: (FundEntity) -> Unit,
+    onSyncAllNavs: () -> Unit,
+    isSyncing: Boolean,
     repository: FundRepository
 ) {
     var query by rememberSaveable { mutableStateOf("") }
@@ -331,12 +526,26 @@ fun AdaptiveDiscoverScreen(
     val gridState = rememberLazyGridState()
 
     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 14.dp)) {
-        Text("Mutual Fund Intelligence Desk", fontSize = 24.sp, fontWeight = FontWeight.Bold)
-        Text("Verified daily NAVs & scoring backed by AMFI & SEBI disclosures", color = Muted, fontSize = 12.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Mutual Fund Intelligence Desk", fontSize = 23.sp, fontWeight = FontWeight.Bold)
+                Text("Verified daily NAVs backed by statutory AMFI disclosures", color = Muted, fontSize = 12.sp)
+            }
+            IconButton(
+                onClick = onSyncAllNavs,
+                enabled = !isSyncing
+            ) {
+                if (isSyncing) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Mint, strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Default.Sync, contentDescription = "Sync Live NAVs", tint = Mint)
+                }
+            }
+        }
 
         Spacer(Modifier.height(14.dp))
 
-        // Search Field with Live AMFI Search Trigger
+        // Search Field with Live AMFI API Trigger
         OutlinedTextField(
             value = query,
             onValueChange = {
@@ -396,8 +605,8 @@ fun AdaptiveDiscoverScreen(
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
             MetricTile("Indexed Funds", "${displayedFunds.size}", Modifier.weight(1f))
-            MetricTile("Source", "AMFI Official", Modifier.weight(1f))
-            MetricTile("Top Score", "${displayedFunds.maxOfOrNull { it.score } ?: 8.4} / 10", Modifier.weight(1f))
+            MetricTile("Source Feed", "AMFI Official", Modifier.weight(1f))
+            MetricTile("Top Grade", "${displayedFunds.maxOfOrNull { it.score } ?: 8.4} / 10", Modifier.weight(1f))
         }
 
         Spacer(Modifier.height(12.dp))
@@ -434,6 +643,7 @@ fun TwoPaneDiscoverScreen(
     selectedFund: FundEntity?,
     onSelectFund: (FundEntity) -> Unit,
     onRefreshScheme: (String) -> Unit,
+    onSyncAllNavs: () -> Unit,
     isSyncing: Boolean,
     repository: FundRepository
 ) {
@@ -463,8 +673,16 @@ fun TwoPaneDiscoverScreen(
                 .background(Navy.copy(alpha = 0.5f))
                 .padding(18.dp)
         ) {
-            Text("Discover Funds", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            Text("AMFI Verified Daily Feeds", color = Muted, fontSize = 11.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Discover Funds", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    Text("AMFI Verified Daily Feeds", color = Muted, fontSize = 11.sp)
+                }
+                IconButton(onClick = onSyncAllNavs, enabled = !isSyncing) {
+                    Icon(Icons.Default.Sync, contentDescription = "Sync All NAVs", tint = Mint)
+                }
+            }
+
             Spacer(Modifier.height(12.dp))
 
             OutlinedTextField(
@@ -551,9 +769,7 @@ fun TwoPaneDiscoverScreen(
                                 )
                             }
                             if (isSelected) {
-                                Box(
-                                    Modifier.size(8.dp).background(Mint, CircleShape)
-                                )
+                                Box(Modifier.size(8.dp).background(Mint, CircleShape))
                             }
                         }
                     }
@@ -569,7 +785,7 @@ fun TwoPaneDiscoverScreen(
             if (selectedFund != null) {
                 FundDetail(
                     fund = selectedFund,
-                    onBack = null, // In two-pane mode, back is not needed
+                    onBack = null,
                     onRefresh = { onRefreshScheme(selectedFund.schemeCode) },
                     isSyncing = isSyncing
                 )
@@ -584,7 +800,7 @@ fun TwoPaneDiscoverScreen(
                             color = Muted,
                             fontSize = 12.sp,
                             modifier = Modifier.padding(horizontal = 32.dp),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
@@ -639,6 +855,8 @@ fun FundDetail(
     onRefresh: () -> Unit,
     isSyncing: Boolean
 ) {
+    val context = LocalContext.current
+
     LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         if (onBack != null) {
             item {
@@ -683,13 +901,53 @@ fun FundDetail(
                     }
                 }
                 IconButton(
-                    onClick = onRefresh,
+                    onClick = {
+                        onRefresh()
+                        Toast.makeText(context, "Fetching live NAV from AMFI…", Toast.LENGTH_SHORT).show()
+                    },
                     enabled = !isSyncing
                 ) {
                     if (isSyncing) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Mint, strokeWidth = 2.dp)
                     } else {
-                        Icon(Icons.Default.Refresh, "Refresh from AMFI", tint = Mint)
+                        Icon(Icons.Default.Refresh, "Refresh Live NAV", tint = Mint)
+                    }
+                }
+            }
+        }
+
+        // Live NAV Hero Card
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = PanelAlt),
+                shape = RoundedCornerShape(18.dp)
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(18.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("OFFICIAL DAILY NAV", color = Mint, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            if (fund.nav > 0) "₹${fund.nav}" else "Fetching NAV…",
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text("As of: ${fund.navDate.ifBlank { "Latest AMFI Feed" }}", color = Muted, fontSize = 11.sp)
+                    }
+
+                    OutlinedButton(
+                        onClick = onRefresh,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Mint),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Mint.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(20.dp)
+                    ) {
+                        Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Live NAV", fontSize = 11.sp)
                     }
                 }
             }
@@ -704,9 +962,6 @@ fun FundDetail(
                         Text("FundScope AI Composite Grade", color = Muted, fontSize = 11.sp)
                         Text("${fund.score} / 10 • ${grade(fund.score)}", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                         Text("3Y CAGR: ${fund.returns3y}% • 5Y CAGR: ${fund.returns5y}%", color = Gold, fontSize = 11.sp)
-                        if (fund.nav > 0) {
-                            Text("Latest NAV: ₹${fund.nav} (${fund.navDate})", color = Mint, fontSize = 11.sp)
-                        }
                     }
                 }
             }
