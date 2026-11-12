@@ -4,3 +4,6 @@ local.properties
 /build/
 **/build/
 *.iml
+.DS_Store
+**/.DS_Store
+.kotlin/
