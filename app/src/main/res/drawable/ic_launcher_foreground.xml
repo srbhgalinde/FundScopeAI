@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.82"
+        android:scaleY="0.82"
+        android:pivotX="54"
+        android:pivotY="54">
+
+        <!-- Precision Scope Outer Circular Ring -->
+        <path
+            android:pathData="M54,18 A36,36 0 1,1 18,54 A36,36 0 0,1 54,18"
+            android:strokeColor="#2C4872"
+            android:strokeWidth="2.5" />
+
+        <!-- Scope Target Arcs (Top-Left & Bottom-Right Mint Accents) -->
+        <path
+            android:pathData="M54,18 A36,36 0 0,0 18,54"
+            android:strokeColor="#55D6A5"
+            android:strokeWidth="3.2"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M54,90 A36,36 0 0,0 90,54"
+            android:strokeColor="#55D6A5"
+            android:strokeWidth="3.2"
+            android:strokeLineCap="round" />
+
+        <!-- Scope Precision Reticle Marks / Ticks -->
+        <path
+            android:pathData="M54,12 L54,20 M54,88 L54,96 M12,54 L20,54 M88,54 L96,54"
+            android:strokeColor="#55D6A5"
+            android:strokeWidth="2.5"
+            android:strokeLineCap="round" />
+
+        <!-- Financial Growth Bars (Rising Investment Wealth) -->
+        <!-- Bar 1 (Short) -->
+        <path
+            android:fillColor="#395880"
+            android:pathData="M34,68 L40,68 A2,2 0 0,0 42,66 L42,56 A2,2 0 0,0 40,54 L34,54 A2,2 0 0,0 32,56 L32,66 A2,2 0 0,0 34,68 Z" />
+        <!-- Bar 2 (Medium) -->
+        <path
+            android:fillColor="#55D6A5"
+            android:pathData="M46,68 L52,68 A2,2 0 0,0 54,66 L54,46 A2,2 0 0,0 52,44 L46,44 A2,2 0 0,0 44,46 L44,66 A2,2 0 0,0 46,68 Z" />
+        <!-- Bar 3 (Tall - Gold) -->
+        <path
+            android:fillColor="#FFC766"
+            android:pathData="M58,68 L64,68 A2,2 0 0,0 66,66 L66,36 A2,2 0 0,0 64,34 L58,34 A2,2 0 0,0 56,36 L56,66 A2,2 0 0,0 58,68 Z" />
+        <!-- Bar 4 (Peak) -->
+        <path
+            android:fillColor="#55D6A5"
+            android:pathData="M70,68 L76,68 A2,2 0 0,0 78,66 L78,28 A2,2 0 0,0 76,26 L70,26 A2,2 0 0,0 68,28 L68,66 A2,2 0 0,0 70,68 Z" />
+
+        <!-- Upward Momentum Trend Curve with Arrow -->
+        <path
+            android:pathData="M32,60 Q 52,50 76,28"
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="2.8"
+            android:strokeLineCap="round" />
+
+        <!-- AI Intelligence Spark / Diamond (✦) at Peak -->
+        <path
+            android:fillColor="#FFC766"
+            android:pathData="M78,26 Q 78,20 83,20 Q 78,20 78,14 Q 78,20 73,20 Q 78,20 78,26 Z" />
+    </group>
+</vector>

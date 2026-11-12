@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#0B1426</color>
+    <color name="navy">#101B32</color>
+    <color name="panel">#1A2945</color>
+    <color name="mint">#55D6A5</color>
+    <color name="gold">#FFC766</color>
+</resources>
