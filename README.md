@@ -1,2 +1,2 @@
 # FundScopeAI
-FundScope AI is an android app that grades Mutual Funds in Indian market based on their value, past performance
+FundScope AI is an independent financial technology research tool. It derives data from public AMFI and SEBI feeds. Mutual fund investments are subject to market risks; please read all scheme-related documents carefully before investing. Historical NAV performances and CAGR scores are for informational research purposes and do not represent guaranteed future returns or investment advisory advice.
